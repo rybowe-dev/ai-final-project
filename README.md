@@ -70,6 +70,6 @@ Re-run `train.py` whenever you want fresher data or different settings.
 
 ## Team
 
-- Name 1
-- Name 2
-- Name 3
+- Rylan Bowe
+- Colin Grant
+- Leo Yin
