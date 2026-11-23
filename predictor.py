@@ -1,148 +1,145 @@
 """
-Buy/Sell classifier for a stock using Naive Bayes, Perceptron, and MLP.
+predictor.py - model definitions, hyperparameter tuning, final training and prediction.
 
-Setup:
-    pip install yfinance pandas numpy scikit-learn matplotlib
+The three required algorithms are Gaussian Naive Bayes, a Perceptron and an MLP.
+Every model is wrapped in a Pipeline with a StandardScaler, so scaling statistics
+are learned from the training data only (also inside every cross-validation fold).
 
-Run:
-    python nvda_buy_sell.py
+Design notes
+------------
+* MLP early stopping is disabled. scikit-learn's built-in early stopping carves a
+  *random* validation set out of the training data, which mixes future and past
+  rows. Regularisation (alpha) and a fixed iteration cap are used instead, and
+  alpha / architecture are tuned with chronological walk-forward CV.
+* Evaluation models (trained on the training period only) are kept separate from
+  final models (trained on all labeled data) that are used for the live prediction.
+* Run `python predictor.py` for a quick command-line report.
 """
+
+import warnings
+from contextlib import contextmanager
 
 import numpy as np
 import pandas as pd
-from sklearn.naive_bayes import GaussianNB
-from sklearn.linear_model import Perceptron
-from sklearn.neural_network import MLPClassifier
-from sklearn.preprocessing import StandardScaler
-from sklearn.pipeline import make_pipeline
+from sklearn.base import clone
 from sklearn.dummy import DummyClassifier
-from sklearn.metrics import accuracy_score, f1_score, classification_report, confusion_matrix
+from sklearn.exceptions import ConvergenceWarning
+from sklearn.linear_model import Perceptron
+from sklearn.model_selection import GridSearchCV, TimeSeriesSplit, cross_val_score
+from sklearn.naive_bayes import GaussianNB
+from sklearn.neural_network import MLPClassifier
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
 
-TICKER = "NVDA"          # note: the ticker is NVDA (company: NVIDIA)
-START = "2010-01-01"
-HORIZON = 5              # predict whether price is higher HORIZON trading days from now
-TEST_FRACTION = 0.2      # last 20% of history is held out for testing
+RANDOM_STATE = 42
+MODEL_NAMES = ["Naive Bayes", "Perceptron", "MLP"]
+BASELINE_NAME = "Baseline (majority)"
 
-
-# ---------------------------------------------------------------- data
-def load_prices(ticker=TICKER, start=START):
-    import yfinance as yf
-    df = yf.download(ticker, start=start, auto_adjust=True, progress=False)
-    # newer yfinance versions return MultiIndex columns; flatten them
-    if isinstance(df.columns, pd.MultiIndex):
-        df.columns = df.columns.get_level_values(0)
-    return df[["Open", "High", "Low", "Close", "Volume"]].dropna()
-
-
-# ------------------------------------------------------------ features
-def rsi(close, n=14):
-    delta = close.diff()
-    gain = delta.clip(lower=0).rolling(n).mean()
-    loss = (-delta.clip(upper=0)).rolling(n).mean()
-    rs = gain / loss.replace(0, np.nan)
-    return 100 - 100 / (1 + rs)
+PARAM_GRIDS = {
+    "Naive Bayes": {"clf__var_smoothing": [1e-9, 1e-6, 1e-3, 1e-2, 1e-1]},
+    "Perceptron": {"clf__alpha": [1e-5, 1e-4, 1e-3, 1e-2]},
+    "MLP": {
+        "clf__hidden_layer_sizes": [(16,), (32,), (64,), (32, 16)],
+        "clf__alpha": [1e-3, 1e-2, 1e-1],
+    },
+}
 
 
-def make_features(df):
-    c = df["Close"]
-    f = pd.DataFrame(index=df.index)
-    f["ret_1d"] = c.pct_change(1)
-    f["ret_5d"] = c.pct_change(5)
-    f["ret_10d"] = c.pct_change(10)
-    f["ret_20d"] = c.pct_change(20)
-    f["sma10_ratio"] = c / c.rolling(10).mean() - 1
-    f["sma50_ratio"] = c / c.rolling(50).mean() - 1
-    f["sma200_ratio"] = c / c.rolling(200).mean() - 1
-    f["vol_10d"] = c.pct_change().rolling(10).std()
-    f["vol_30d"] = c.pct_change().rolling(30).std()
-    f["rsi_14"] = rsi(c, 14)
-    ema12, ema26 = c.ewm(span=12).mean(), c.ewm(span=26).mean()
-    macd = ema12 - ema26
-    f["macd_hist"] = (macd - macd.ewm(span=9).mean()) / c   # normalized by price
-    f["volume_ratio"] = df["Volume"] / df["Volume"].rolling(20).mean()
-    f["hl_range"] = (df["High"] - df["Low"]) / c
-    return f
+@contextmanager
+def quiet():
+    """Silence ConvergenceWarning noise during fitting."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=ConvergenceWarning)
+        yield
 
 
-def make_labels(df, horizon=HORIZON):
-    """1 = BUY (price higher in `horizon` days), 0 = SELL."""
-    future_ret = df["Close"].shift(-horizon) / df["Close"] - 1
-    return (future_ret > 0).astype(int), future_ret
+def build_model(name: str) -> Pipeline:
+    """Untrained model with default hyperparameters."""
+    if name == BASELINE_NAME:
+        clf = DummyClassifier(strategy="most_frequent")
+    elif name == "Naive Bayes":
+        clf = GaussianNB()
+    elif name == "Perceptron":
+        clf = Perceptron(penalty="l2", alpha=1e-4, max_iter=1000, tol=1e-3,
+                         random_state=RANDOM_STATE)
+    elif name == "MLP":
+        clf = MLPClassifier(hidden_layer_sizes=(32,), alpha=1e-2, max_iter=500,
+                            early_stopping=False, random_state=RANDOM_STATE)
+    else:
+        raise ValueError(f"Unknown model: {name}")
+    return Pipeline([("scaler", StandardScaler()), ("clf", clf)])
 
 
-def build_dataset(df):
-    X = make_features(df)
-    y, future_ret = make_labels(df)
-    data = X.copy()
-    data["y"] = y
-    data["future_ret"] = future_ret
-    data = data.replace([np.inf, -np.inf], np.nan).dropna()
-    # the last HORIZON rows have no label (future unknown) and were dropped by dropna
-    return data.drop(columns=["y", "future_ret"]), data["y"], data["future_ret"]
+def fit_model(name: str, X, y, params: dict | None = None) -> Pipeline:
+    model = build_model(name)
+    if params:
+        model.set_params(**params)
+    with quiet():
+        model.fit(X, y)
+    return model
 
 
-# ------------------------------------------------------------- modeling
-def get_models():
-    return {
-        "Baseline (majority)": DummyClassifier(strategy="most_frequent"),
-        "Naive Bayes": make_pipeline(StandardScaler(), GaussianNB()),
-        "Perceptron": make_pipeline(
-            StandardScaler(), Perceptron(max_iter=1000, tol=1e-3, random_state=42)
-        ),
-        "MLP": make_pipeline(
-            StandardScaler(),
-            MLPClassifier(
-                hidden_layer_sizes=(64, 32),
-                alpha=1e-3,                 # L2 regularization
-                early_stopping=True,        # holds out part of train set internally
-                max_iter=500,
-                random_state=42,
-            ),
-        ),
-    }
+# ------------------------------------------------------------ validation
+def walk_forward_scores(estimator, X, y, horizon: int, n_splits: int) -> np.ndarray:
+    """Balanced accuracy on each walk-forward fold (expanding window, with a
+    `horizon`-sized gap so training labels never overlap the validation period)."""
+    cv = TimeSeriesSplit(n_splits=n_splits, gap=horizon)
+    with quiet():
+        return cross_val_score(clone(estimator), X, y, cv=cv, scoring="balanced_accuracy")
 
 
-def time_split(X, y, test_fraction=TEST_FRACTION, gap=HORIZON):
-    """Chronological split. `gap` rows are skipped between train and test so
-    that training labels (which look `gap` days ahead) don't overlap the test period."""
-    n = len(X)
-    split = int(n * (1 - test_fraction))
-    return (X.iloc[:split], X.iloc[split + gap:],
-            y.iloc[:split], y.iloc[split + gap:])
+def tune_model(name: str, X_train, y_train, horizon: int, n_splits: int):
+    """GridSearchCV with walk-forward (TimeSeriesSplit + gap) cross-validation.
+
+    Returns (best fitted model, best params, per-fold CV scores of the best params).
+    The grid search only ever sees the training period.
+    """
+    cv = TimeSeriesSplit(n_splits=n_splits, gap=horizon)
+    search = GridSearchCV(build_model(name), PARAM_GRIDS[name], cv=cv,
+                          scoring="balanced_accuracy", refit=True, n_jobs=1)
+    with quiet():
+        search.fit(X_train, y_train)
+    best = search.best_index_
+    folds = np.array([search.cv_results_[f"split{i}_test_score"][best] for i in range(n_splits)])
+    return search.best_estimator_, search.best_params_, folds
 
 
-def main():
-    df = load_prices()
-    print(f"Loaded {len(df)} rows of {TICKER}: {df.index[0].date()} -> {df.index[-1].date()}")
+# ------------------------------------------------------- final inference
+def train_final_models(X, y, best_params: dict) -> dict:
+    """Fit fresh models on ALL labeled data (used only for the live prediction)."""
+    return {name: fit_model(name, X, y, best_params.get(name)) for name in MODEL_NAMES}
 
-    X, y, future_ret = build_dataset(df)
-    X_train, X_test, y_train, y_test = time_split(X, y)
-    print(f"Train: {len(X_train)} rows | Test: {len(X_test)} rows "
-          f"({X_test.index[0].date()} -> {X_test.index[-1].date()})")
-    print(f"Fraction BUY in train: {y_train.mean():.2f} | in test: {y_test.mean():.2f}\n")
 
-    results = {}
-    for name, model in get_models().items():
-        model.fit(X_train, y_train)
-        pred = model.predict(X_test)
-        results[name] = pred
-        print(f"=== {name} ===")
-        print(f"Accuracy: {accuracy_score(y_test, pred):.3f} | "
-              f"F1: {f1_score(y_test, pred, zero_division=0):.3f}")
-        print(confusion_matrix(y_test, pred))
-        print()
+def predict_latest(models: dict, X_latest: pd.DataFrame) -> pd.DataFrame:
+    """Predicted price direction for the newest feature row."""
+    rows = []
+    for name, model in models.items():
+        prob = float(model.predict_proba(X_latest)[0, 1]) if hasattr(model, "predict_proba") else np.nan
+        rows.append({"Model": name, "Predicted direction": int(model.predict(X_latest)[0]),
+                     "P(up)": prob})
+    return pd.DataFrame(rows).set_index("Model")
 
-    # Crude sanity check: would following the signals have made money?
-    # (ignores transaction costs, slippage, taxes -- do not trust this blindly)
-    test_ret = future_ret.loc[y_test.index]
-    print("=== Avg 5-day return when model says BUY vs. always-buy ===")
-    print(f"Always buy: {test_ret.mean():.4f}")
-    for name, pred in results.items():
-        if name.startswith("Baseline"):
-            continue
-        buys = test_ret[pred == 1]
-        print(f"{name}: {buys.mean() if len(buys) else float('nan'):.4f} "
-              f"({len(buys)} buy signals)")
+
+def format_params(params: dict) -> str:
+    return ", ".join(f"{k.replace('clf__', '')}={v}" for k, v in params.items()) or "defaults"
+
+
+# ------------------------------------------------------------------- CLI
+def main(ticker: str = "NVDA", start: str = "2010-01-01", horizon: int = 5):
+    from evaluation import run_pipeline  # imported here to avoid a circular import
+    from features import load_prices
+
+    prices = load_prices(ticker, start)
+    print(f"{ticker}: {len(prices)} rows, {prices.index[0].date()} -> {prices.index[-1].date()}")
+    result = run_pipeline(prices, horizon=horizon, progress=print)
+
+    pd.set_option("display.width", 120)
+    print("\nHold-out test metrics")
+    print(result.metrics.round(3))
+    print("\nLatest predicted price direction "
+          f"({result.latest_date.date()}, next {horizon} trading days)")
+    print(result.final_predictions.replace({"Predicted direction": {1: "UP", 0: "DOWN"}}))
+    print("\nThis is a direction forecast from a research model, not a trading recommendation.")
 
 
 if __name__ == "__main__":
