@@ -13,8 +13,10 @@ Compares three machine learning models (**Gaussian Naive Bayes**, **Perceptron**
 | `evaluation.py` | Chronological split, metrics, permutation importance, regime and horizon analysis, end-to-end `run_pipeline()` |
 | `train.py` | Console script: trains and evaluates everything, saves results to `artifacts/` |
 | `experiment.py` | Saved, repeatable experiment runs: walk-forward windows, seeds, bootstrap CIs, `repeat` and `compare` commands |
-| `tests/` | `pytest` tests for leakage safeguards and the experiment framework (`pip install -r requirements-dev.txt`, then `pytest`) |
-| `app.py` | Streamlit dashboard (4 tabs, Plotly charts) that loads the saved results |
+| `run_results.py` | Read-only loading and analysis of the saved runs in `runs/` (no training) |
+| `experiments_view.py` | Streamlit views for the saved experiments (summary, performance, windows, regimes, comparison) |
+| `tests/` | `pytest` tests for leakage safeguards, the experiment framework and the dashboard's run loading/views (`pip install -r requirements-dev.txt`, then `pytest`) |
+| `app.py` | Streamlit dashboard (Plotly charts) that loads the saved results from `artifacts/` and `runs/` |
 | `requirements.txt` | Python dependencies |
 
 ## Methodology
@@ -61,8 +63,12 @@ Run `python train.py --help` for all options.
 streamlit run app.py
 ```
 
-Pick a saved run in the sidebar. Tabs: **Overview**, **Model Comparison**, **Feature Analysis**, **Market Conditions**.
-Re-run `train.py` whenever you want fresher data or different settings.
+Use **View** in the sidebar to switch between two sets of saved results:
+
+- **Single hold-out run (train.py):** pick a run in the sidebar. Tabs: **Overview**, **Model Comparison**, **Feature Analysis**, **Market Conditions**. Re-run `train.py` for fresher data or different settings.
+- **Experiments (experiment.py):** pick an experiment from `runs/`. Tabs: **Summary** (metadata, configuration, headline results), **Model performance** (measured metrics, then bootstrap confidence intervals and differences from the baseline), **Walk-forward windows** (per-window results, seed variation), **Volatility regimes** (with sample sizes) and **Compare experiments** (flags differing data, windows and settings). Tables have CSV downloads, and each chart's camera button saves a high-resolution PNG.
+
+The dashboard never trains or re-runs experiments; new runs appear after a page reload.
 
 ## Experiments (saved, repeatable, comparable runs)
 

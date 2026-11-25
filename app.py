@@ -3,8 +3,9 @@ app.py - Streamlit dashboard.
 
 Run:  streamlit run app.py
 
-Models are trained from the console (python train.py). This dashboard only loads the
-saved results from artifacts/, so it opens instantly and never retrains.
+Models are trained from the console (python train.py) and experiments are run with
+python experiment.py. This dashboard only loads the saved results (artifacts/ and runs/),
+so it opens instantly and never retrains.
 """
 
 from pathlib import Path
@@ -18,9 +19,11 @@ import streamlit as st
 from plotly.subplots import make_subplots
 
 import evaluation
+import experiments_view
 import features
 import predictor
 from predictor import BASELINE_NAME, MODEL_NAMES
+from run_results import RUNS_DIR
 
 UP, DOWN = "#16a34a", "#dc2626"
 COLORS = {"Naive Bayes": "#2563eb", "Perceptron": "#f59e0b", "MLP": "#8b5cf6",
@@ -62,6 +65,16 @@ st.caption("Compares Gaussian Naive Bayes, a Perceptron and an MLP at forecastin
            "price will be higher after a chosen number of trading days.")
 
 files = sorted(ARTIFACT_DIR.glob("*.joblib"), key=lambda p: p.stat().st_mtime, reverse=True)
+
+HOLDOUT, EXPERIMENTS = "Single hold-out run (train.py)", "Experiments (experiment.py)"
+with st.sidebar:
+    st.header("🔎 View")
+    view = st.radio("Results from", [HOLDOUT, EXPERIMENTS], index=0 if files else 1,
+                    label_visibility="collapsed")
+if view == EXPERIMENTS:
+    experiments_view.render(RUNS_DIR)
+    st.stop()
+
 if not files:
     st.warning("No trained results found. Train from the console first, then reload this page:")
     st.code("python train.py --ticker NVDA --horizon 5", language="bash")

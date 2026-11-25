@@ -504,12 +504,15 @@ def main() -> int:
                      n_windows=a.n_windows, initial_train_fraction=a.initial_train_fraction,
                      n_seeds=a.n_seeds, cv_folds=a.cv_folds, tune=not a.no_tune,
                      n_bootstrap=a.n_bootstrap)
+        run_id = a.name or f"{cfg.ticker}_h{cfg.horizon}_{dt.datetime.now():%Y%m%d-%H%M%S}"
+        if (a.runs_dir / run_id).exists():  # fail before the download and the long computation
+            raise SystemExit(f"Run '{run_id}' already exists in {a.runs_dir}. Choose another --name "
+                             "(runs are never overwritten).")
         snapshot = a.snapshot
         if snapshot is None:
             prices = features.load_prices(cfg.ticker, cfg.start)
             snapshot = save_snapshot(prices, cfg.ticker)
             print(f"Saved data snapshot {snapshot}")
-        run_id = a.name or f"{cfg.ticker}_h{cfg.horizon}_{dt.datetime.now():%Y%m%d-%H%M%S}"
         out = execute_run(cfg, snapshot, a.runs_dir / run_id, a.n_jobs)
         print("\n" + out["report"])
         print(f"\nSaved to {a.runs_dir / run_id}")

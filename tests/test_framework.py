@@ -122,6 +122,14 @@ def test_compare_flags_config_and_summarises(saved_run):
     assert set(table.index.get_level_values("Model")) == set(experiment.ALL_NAMES)
 
 
+def test_existing_run_name_fails_before_any_work(tmp_path, monkeypatch):
+    (tmp_path / "runs" / "taken").mkdir(parents=True)
+    monkeypatch.setattr("sys.argv", ["experiment.py", "--runs-dir", str(tmp_path / "runs"), "run", "--name", "taken"])
+    monkeypatch.setattr(features, "load_prices", lambda *a, **k: pytest.fail("data must not be downloaded"))
+    with pytest.raises(SystemExit, match="already exists"):
+        experiment.main()
+
+
 def test_baseline_has_zero_difference_and_balanced_accuracy_half(saved_run):
     root, _, _ = saved_run
     s = pd.read_csv(root / "runs" / "a" / "summary.csv", index_col="Model")
