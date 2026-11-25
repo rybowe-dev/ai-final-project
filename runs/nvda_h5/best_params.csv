@@ -1,0 +1,16 @@
+Window,Model,params
+1,Naive Bayes,var_smoothing=0.1
+1,Perceptron,alpha=0.0001
+1,MLP,"alpha=0.001, hidden_layer_sizes=(64,)"
+2,Naive Bayes,var_smoothing=1e-09
+2,Perceptron,alpha=1e-05
+2,MLP,"alpha=0.001, hidden_layer_sizes=(64,)"
+3,Naive Bayes,var_smoothing=1e-09
+3,Perceptron,alpha=0.01
+3,MLP,"alpha=0.001, hidden_layer_sizes=(32, 16)"
+4,Naive Bayes,var_smoothing=0.1
+4,Perceptron,alpha=1e-05
+4,MLP,"alpha=0.1, hidden_layer_sizes=(32, 16)"
+5,Naive Bayes,var_smoothing=0.1
+5,Perceptron,alpha=0.001
+5,MLP,"alpha=0.001, hidden_layer_sizes=(64,)"

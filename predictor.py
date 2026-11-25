@@ -88,17 +88,25 @@ def walk_forward_scores(estimator, X, y, horizon: int, n_splits: int) -> np.ndar
         return cross_val_score(clone(estimator), X, y, cv=cv, scoring="balanced_accuracy")
 
 
+def tune_search(name: str, X_train, y_train, horizon: int, n_splits: int,
+                n_jobs: int = 1) -> GridSearchCV:
+    """Fitted GridSearchCV (walk-forward CV with a `horizon` gap). Keeps cv_results_
+    so the score of every grid point can be inspected, not just the winner."""
+    cv = TimeSeriesSplit(n_splits=n_splits, gap=horizon)
+    search = GridSearchCV(build_model(name), PARAM_GRIDS[name], cv=cv,
+                          scoring="balanced_accuracy", refit=True, n_jobs=n_jobs)
+    with quiet():
+        search.fit(X_train, y_train)
+    return search
+
+
 def tune_model(name: str, X_train, y_train, horizon: int, n_splits: int):
     """GridSearchCV with walk-forward (TimeSeriesSplit + gap) cross-validation.
 
     Returns (best fitted model, best params, per-fold CV scores of the best params).
     The grid search only ever sees the training period.
     """
-    cv = TimeSeriesSplit(n_splits=n_splits, gap=horizon)
-    search = GridSearchCV(build_model(name), PARAM_GRIDS[name], cv=cv,
-                          scoring="balanced_accuracy", refit=True, n_jobs=1)
-    with quiet():
-        search.fit(X_train, y_train)
+    search = tune_search(name, X_train, y_train, horizon, n_splits)
     best = search.best_index_
     folds = np.array([search.cv_results_[f"split{i}_test_score"][best] for i in range(n_splits)])
     return search.best_estimator_, search.best_params_, folds

@@ -1,0 +1,13 @@
+{
+  "ticker": "NVDA",
+  "start": "2010-01-01",
+  "end": null,
+  "horizon": 20,
+  "n_windows": 5,
+  "initial_train_fraction": 0.5,
+  "n_seeds": 10,
+  "cv_folds": 4,
+  "tune": true,
+  "n_bootstrap": 2000,
+  "bootstrap_seed": 0
+}

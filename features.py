@@ -12,6 +12,7 @@ Leakage rules followed here
   so the threshold at date t depends only on data available at date t.
 """
 
+import datetime as dt
 from dataclasses import dataclass
 
 import numpy as np
@@ -48,7 +49,23 @@ def load_prices(ticker: str, start: str = "2010-01-01") -> pd.DataFrame:
         df.columns = df.columns.get_level_values(0)
     df = df[["Open", "High", "Low", "Close", "Volume"]]
     df = df[~df.index.duplicated()].sort_index()
-    return df.replace([np.inf, -np.inf], np.nan).dropna()
+    return drop_incomplete_bar(df.replace([np.inf, -np.inf], np.nan).dropna())
+
+
+def drop_incomplete_bar(df: pd.DataFrame, now: pd.Timestamp | None = None) -> pd.DataFrame:
+    """Remove today's bar if the US market has not finished trading.
+
+    Yahoo returns a partial intraday bar for the current session; its close and
+    volume are not final, so it must not be used as a feature row or label.
+    The cutoff is 16:15 New York time (the 16:00 close plus a settling margin).
+    """
+    now = pd.Timestamp.now(tz="America/New_York") if now is None else now
+    if now.tzinfo is None:
+        now = now.tz_localize("America/New_York")
+    now = now.tz_convert("America/New_York")
+    if len(df) and df.index[-1].date() == now.date() and now.time() < dt.time(16, 15):
+        return df.iloc[:-1]
+    return df
 
 
 # ------------------------------------------------------------- indicators

@@ -1,0 +1,45 @@
+Run nvda_h10  |  NVDA  horizon=10  windows=5  seeds=10  tuned=True
+Data: 2010-01-04 -> 2026-11-23 (4249 rows), sha256 b59f7c75037e
+
+Pooled out-of-sample results (all windows; stochastic models averaged over seeds)
+                        Accuracy [95% CI]    Bal. acc. [95% CI]  Acc - baseline [95% CI]     MCC    AUC Win vs base Window BA sd Seed BA sd
+Model                                                                                                                                      
+Baseline (majority)  0.593 [0.541, 0.651]  0.500 [0.500, 0.500]  +0.000 [+0.000, +0.000]  +0.000  0.500         0/5        0.000        nan
+Naive Bayes          0.495 [0.455, 0.539]  0.481 [0.440, 0.525]  -0.098 [-0.164, -0.036]  -0.038  0.492         0/5        0.051        nan
+Perceptron           0.524 [0.508, 0.541]  0.505 [0.492, 0.516]  -0.069 [-0.116, -0.029]  +0.010  0.510         0/5        0.013      0.016
+MLP                  0.520 [0.487, 0.555]  0.490 [0.462, 0.521]  -0.073 [-0.125, -0.029]  -0.021  0.490         0/5        0.020      0.013
+
+Balanced accuracy by window (seed mean)
+Model   Baseline (majority)  Naive Bayes  Perceptron    MLP
+Window                                                     
+1                       0.5        0.388       0.505  0.494
+2                       0.5        0.491       0.498  0.514
+3                       0.5        0.499       0.495  0.475
+4                       0.5        0.503       0.528  0.467
+5                       0.5        0.511       0.498  0.507
+
+Window test periods
+  1: 2018-11-01 -> 2020-06-12
+  2: 2020-06-15 -> 2022-01-20
+  3: 2022-01-21 -> 2023-08-31
+  4: 2023-09-01 -> 2025-04-14
+  5: 2025-04-15 -> 2026-11-09
+
+Fraction of fits that converged before max_iter
+Model
+MLP           0.26
+Perceptron    1.00
+
+By volatility regime (pooled)
+         Regime               Model  Rows  Up share  Accuracy  Balanced Accuracy
+ Low volatility Baseline (majority)   569     0.622     0.622              0.500
+ Low volatility         Naive Bayes   569     0.622     0.438              0.486
+ Low volatility          Perceptron   569     0.622     0.523              0.503
+ Low volatility                 MLP   569     0.622     0.587              0.507
+High volatility Baseline (majority)  1446     0.582     0.582              0.500
+High volatility         Naive Bayes  1446     0.582     0.517              0.488
+High volatility          Perceptron  1446     0.582     0.524              0.506
+High volatility                 MLP  1446     0.582     0.493              0.478
+
+CIs: moving-block bootstrap, 2000 resamples, block length 20. A CI for 'Acc - baseline' that contains 0 (or a balanced-accuracy CI that contains 0.5) means no detectable skill over the baseline.
+Research output only; not trading advice.

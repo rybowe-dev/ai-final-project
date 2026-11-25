@@ -12,6 +12,8 @@ Compares three machine learning models (**Gaussian Naive Bayes**, **Perceptron**
 | `predictor.py` | Model definitions, `GridSearchCV` tuning with walk-forward CV, final-model training, latest prediction |
 | `evaluation.py` | Chronological split, metrics, permutation importance, regime and horizon analysis, end-to-end `run_pipeline()` |
 | `train.py` | Console script: trains and evaluates everything, saves results to `artifacts/` |
+| `experiment.py` | Saved, repeatable experiment runs: walk-forward windows, seeds, bootstrap CIs, `repeat` and `compare` commands |
+| `tests/` | `pytest` tests for leakage safeguards and the experiment framework (`pip install -r requirements-dev.txt`, then `pytest`) |
 | `app.py` | Streamlit dashboard (4 tabs, Plotly charts) that loads the saved results |
 | `requirements.txt` | Python dependencies |
 
@@ -61,6 +63,26 @@ streamlit run app.py
 
 Pick a saved run in the sidebar. Tabs: **Overview**, **Model Comparison**, **Feature Analysis**, **Market Conditions**.
 Re-run `train.py` whenever you want fresher data or different settings.
+
+## Experiments (saved, repeatable, comparable runs)
+
+`experiment.py` evaluates the three models and the majority baseline over several chronological walk-forward windows and saves everything to `runs/<name>/`.
+
+```bash
+python experiment.py run --name nvda_h5 --horizon 5 --n-jobs 8      # downloads + snapshots data, ~2-3 min on 8 workers
+python experiment.py run --name nvda_h10 --horizon 10 \
+       --snapshot data/snapshots/<file>.csv                         # same data -> comparable
+python experiment.py repeat nvda_h5                                 # re-run from saved config + data, verify identical metrics
+python experiment.py compare nvda_h5 nvda_h10                       # side-by-side table, flags config/data differences
+python experiment.py list
+```
+
+- **Data:** prices are saved to `data/snapshots/` (named by SHA-256) and every run reads them back from there. Today's incomplete bar is dropped. Use the same `--snapshot` for runs you want to compare.
+- **Windows:** the first half of the history is training only; the rest is split into `--windows` test blocks (expanding training set, `horizon`-row gap). Window dates are the same for every horizon.
+- **Tuning and seeds:** `GridSearchCV` (walk-forward CV) runs inside each window on its training data only. Perceptron and MLP are then refit with `--seeds` random seeds to show seed-to-seed variance.
+- **Statistics:** pooled out-of-sample accuracy, balanced accuracy and accuracy-minus-baseline with moving-block-bootstrap 95% CIs, plus MCC, AUC, per-window and per-volatility-regime results, MLP/Perceptron convergence, and the score of every hyperparameter-grid point (`grid_results.csv`).
+- **Saved per run:** `config.json`, `manifest.json` (data hash, library versions, git commit, windows), `metrics.csv`, `predictions.csv.gz`, `grid_results.csv`, `best_params.csv`, `summary.csv`, `window_summary.csv`, `regime_summary.csv`, `report.txt`.
+- Use `--no-tune --seeds 3 --windows 3` for a quick smoke run. `--n-jobs` parallelises the grid search and the seed refits without changing results; run one experiment at a time, since several at once oversubscribe the CPU.
 
 ## Limitations
 
